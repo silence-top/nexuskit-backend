@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: nexuskit-db
+    restart: always
+    environment:
+      POSTGRES_USER: nexus_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: nexuskit_auth
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./deploy/data/postgres:/var/lib/postgresql/data
+    networks:
+      - nexus-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexuskit-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./deploy/data/redis:/data
+    networks:
+      - nexus-net
+
+  api:
+    build:
+      context: .                # ← 必须改成根目录
+      dockerfile: services/Dockerfile
+    volumes:
+      - ./services:/app         # ← 热更新
+      - ./sdk:/sdk              # ← SDK 热更新（可选）
+    ports:
+      - "5000:5000"
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nexus-net
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    volumes:
+      - ./gateway:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - api
+    networks:
+      - nexus-net
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    volumes:
+      - ./admin:/app
+      - /app/node_modules
+    ports:
+      - "8848:8848"
+    depends_on:
+      - api
+    networks:
+      - nexus-net
+
+networks:
+  nexus-net:
+    name: nexuskit-network

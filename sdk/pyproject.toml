@@ -1,0 +1,14 @@
+[project]
+name = "nexuskit-sdk"
+version = "0.1.0"
+description = "NexusKit Python SDK"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "pydantic>=2.0.0",
+    "pyjwt",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel", "build"]
+build-backend = "setuptools.build_meta"
