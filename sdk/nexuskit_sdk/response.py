@@ -1,6 +1,7 @@
 # sdk/response.py
 from typing import Any, Generic, TypeVar
 from pydantic import BaseModel
+from .codes import BizCode
 
 T = TypeVar("T")
 
@@ -24,7 +25,7 @@ def success(data: Any = None, message: str = "success", trace_id: str | None = N
     保持与原实现兼容：返回 plain dict 以便直接传给 FastAPI。
     """
     return UnionResponse[Any](
-        code=20000,
+        code=BizCode.SUCCESS,
         message=message,
         data=data,
         trace_id=trace_id

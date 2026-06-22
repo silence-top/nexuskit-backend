@@ -22,7 +22,7 @@ dependencies = [
     "email-validator>=2.1.0",
 
     # SDK 本地依赖
-    "nexuskit-sdk @ file:///sdk",
+    "nexuskit-sdk @ file:../sdk",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +47,9 @@ ignore = ["E501"]  # 行长度由 formatter 处理
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.setuptools]
+packages = []
 
 [build-system]
 requires = ["setuptools>=69", "wheel", "build"]

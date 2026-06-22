@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from .codes import BizCode
 # 导入内部模块逻辑
 from .exceptions import (
     NexusKitException, 
@@ -42,6 +43,7 @@ def init_app(app: FastAPI):
 # 定义对外暴露的 API
 __all__ = [
     "init_app",
+    "BizCode",
     "NexusKitException",
     "AuthException",
     "TokenExpiredException",
