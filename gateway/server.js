@@ -10,42 +10,88 @@ const INTERNAL_SECRET = process.env.INTERNAL_SECRET;
 const REDIS_URL = process.env.REDIS_URL;
 
 /**
+ * 业务码常量表（与后端 nexuskit_sdk/codes.py 中的 BizCode 保持一致）
+ * 编码规则： HHHSS  HHH=HTTP状态码  SS=业务子码
+ */
+const BizCode = {
+    // 2xx 成功
+    SUCCESS:          20000,
+    // 401 认证失败
+    UNAUTHORIZED:     40100,
+    TOKEN_EXPIRED:    40101,
+    TOKEN_INVALID:    40102,
+    TOKEN_REVOKED:    40103,
+    // 403 权限不足
+    SESSION_EXPIRED:  40303,
+    // 500 服务器错误
+    INTERNAL_ERROR:   50000,
+};
+
+/**
  * 上游服务注册表
- * 新增系统只需在此添加一条记录：
- *   prefix      - 客户端请求路径前缀（同时作为 app_code 来源）
- *   upstream    - 上游服务地址，从环境变量读取
- *   rewrite     - 转发到上游时替换的前缀（按各服务实际路由调整）
- *   appCode     - 注入到 X-App-Code 头的业务系统标识
- *   public      - true 表示该 prefix 下所有路由免鉴权（如独立公开服务）
+ * 新增系统只需在此添加一条记录，无需改动其他代码：
+ *
+ *   prefix       - 客户端请求路径前缀，网关据此识别 appCode（不信任客户端传入）
+ *   upstream     - 上游服务地址，从环境变量读取
+ *   rewrite      - 转发到上游时替换的前缀（按各服务实际路由调整）
+ *   appCode      - 注入到 X-App-Code 头的业务系统标识，后端据此做系统隔离
+ *   publicPaths  - 该系统下免鉴权的相对路径列表（相对于 prefix），支持精确匹配和 ? 参数
+ *
+ * ── 多系统登录设计说明 ──────────────────────────────────────────────────
+ * 每个系统通过独立的 auth 前缀区分登录目标，网关自动识别 appCode 并注入请求头。
+ * 后端同一套代码，根据 X-App-Code 查询用户在对应系统的角色，实现系统隔离。
+ *
+ * 示例：
+ *   nexuskit 用户  → POST /api/auth/login          → X-App-Code: nexuskit
+ *   ERP 用户       → POST /api/erp/auth/login       → X-App-Code: erp
+ *   CRM 用户       → POST /api/crm/auth/login       → X-App-Code: crm
+ * ────────────────────────────────────────────────────────────────────────
  */
 const UPSTREAM_SERVICES = [
+    // ── nexuskit 平台 ──────────────────────────────────────────────────────
     {
         prefix: '/api/auth',
         upstream: process.env.UPSTREAM_URL || 'http://127.0.0.1:5000',
         rewrite: '/api/v1/auth',
         appCode: 'nexuskit',
+        publicPaths: ['/login', '/register', '/refresh'],
     },
     {
         prefix: '/api/identity',
         upstream: process.env.UPSTREAM_URL || 'http://127.0.0.1:5000',
         rewrite: '/api/v1/identity',
         appCode: 'nexuskit',
+        publicPaths: [],
     },
-    // 示例：接入新系统
-    {
-        prefix: '/api/new-system',
-        upstream: process.env.NEW_SYSTEM_URL || 'http://127.0.0.1:5001',
-        rewrite: '/api/v1/new-system',
-        appCode: 'new_system',
-    },
+    // ── 示例：接入 ERP 系统（独立登录入口，复用同一套后端认证服务）────────
+    // {
+    //     prefix: '/api/erp/auth',
+    //     upstream: process.env.UPSTREAM_URL || 'http://127.0.0.1:5000',
+    //     rewrite: '/api/v1/auth',          // 复用同一后端认证接口
+    //     appCode: 'erp',                   // 网关注入 X-App-Code: erp
+    //     publicPaths: ['/login', '/refresh'],
+    // },
+    // {
+    //     prefix: '/api/erp',
+    //     upstream: process.env.ERP_URL || 'http://127.0.0.1:5002',
+    //     rewrite: '/api/v1',
+    //     appCode: 'erp',
+    //     publicPaths: [],
+    // },
 ];
 
-/** 免鉴权白名单（精确路径或 ? 前缀匹配） */
-const AUTH_WHITELIST = [
-    '/api/auth/login',
-    '/api/auth/register',
-    '/api/auth/refresh',
-];
+/**
+ * 动态白名单：从 UPSTREAM_SERVICES 的 publicPaths 自动生成，无需手动维护。
+ * 匹配规则：精确匹配 或 以 "?" 开头的查询参数（如 /login?redirect=xxx）
+ */
+function isPublicPath(url) {
+    return UPSTREAM_SERVICES.some(svc =>
+        (svc.publicPaths || []).some(p => {
+            const full = svc.prefix + p;
+            return url === full || url.startsWith(full + '?');
+        })
+    );
+}
 
 const ORIGIN_RAW = process.env.ORIGIN || '*';
 // '*' 时回退为 true（回显请求 Origin 头），因为 CORS 规范禁止 origin:'*' + credentials:true
@@ -88,11 +134,11 @@ fastify.addHook('onRequest', async (request) => {
  * 2. 鉴权：JWT 签名验证 + AT 黑名单检查
  */
 fastify.addHook('preHandler', async (request, reply) => {
-    if (AUTH_WHITELIST.some(p => request.url === p || request.url.startsWith(p + '?'))) return;
+    if (isPublicPath(request.url)) return;
 
     const authHeader = request.headers['authorization'];
     if (!authHeader?.startsWith('Bearer ')) {
-        return reply.code(401).send({ code: 40100, message: 'Missing Token', traceId: request.traceId });
+        return reply.code(401).send({ code: BizCode.UNAUTHORIZED, message: 'Missing Token', traceId: request.traceId });
     }
 
     const token = authHeader.split(' ')[1];
@@ -101,14 +147,15 @@ fastify.addHook('preHandler', async (request, reply) => {
         decoded = jwt.verify(token, JWT_SECRET);
     } catch (err) {
         console.error('[NexusKit Gateway] JWT Verify Error:', err);
-        return reply.code(401).send({ code: 40100, message: 'Invalid Token', traceId: request.traceId });
+        const code = err.name === 'TokenExpiredError' ? BizCode.TOKEN_EXPIRED : BizCode.TOKEN_INVALID;
+        return reply.code(401).send({ code, message: err.name === 'TokenExpiredError' ? 'Token Expired' : 'Invalid Token', traceId: request.traceId });
     }
 
     // AT 黑名单检查：拦截已刷新/已吸销的不过期 token
     if (decoded.jti) {
         const blacklisted = await fastify.redis.get(`auth:at:blacklist:${decoded.jti}`);
         if (blacklisted) {
-            return reply.code(401).send({ code: 40100, message: 'Token Revoked', traceId: request.traceId });
+            return reply.code(403).send({ code: BizCode.SESSION_EXPIRED, message: 'Token Revoked', traceId: request.traceId });
         }
     }
 

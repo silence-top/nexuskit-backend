@@ -32,6 +32,6 @@ Start-Process cmd.exe `
 # Admin
 Start-Process cmd.exe `
     -ArgumentList '/k title Admin-Service && volta run --node 22 --pnpm 10 pnpm dev' `
-    -WorkingDirectory 'admin'
+    -WorkingDirectory '../nexuskit-admin'
 
 Write-Host "🎉 所有服务已启动，请查看各窗口输出。" -ForegroundColor Green

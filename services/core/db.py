@@ -44,7 +44,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
 
-async def wait_for_db(max_retries: int = 30, delay: float = 1.0):
+async def wait_for_db(max_retries: int = 60, delay: float = 2.0):
     """
     等待数据库就绪（带重试机制）
     - max_retries: 最大重试次数

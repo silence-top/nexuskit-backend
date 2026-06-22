@@ -35,6 +35,7 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+.qoder
 
 #排除admin，admin单独有仓库
 admin

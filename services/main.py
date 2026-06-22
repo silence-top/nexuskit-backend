@@ -23,11 +23,13 @@ app.add_middleware(TraceMiddleware)
 setup_sdk_exception_handlers(app)
 
 # Domain error → unified JSON response (no HTTP knowledge in exceptions)
+# biz_code 优先使用子类显式绑定的业务码；未设置时回退到 status_code * 100
 @app.exception_handler(DomainError)
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
+    biz_code = exc.biz_code if exc.biz_code is not None else exc.status_code * 100
     return JSONResponse(
         status_code=exc.status_code,
-        content=response.fail(code=exc.status_code * 100, message=exc.message),
+        content=response.fail(code=biz_code, message=exc.message),
     )
 
 # Routes — version prefix controlled at mount point, not in domain routers

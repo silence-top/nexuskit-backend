@@ -26,18 +26,18 @@ async def _seed_permissions(db: AsyncSession) -> bool:
     created = False
 
     # 1. Initialize app
-    result = await db.execute(select(App).where(App.app_code == "platform"))
-    platform_app = result.scalar_one_or_none()
+    result = await db.execute(select(App).where(App.app_code == "nexuskit"))
+    nexuskit_app = result.scalar_one_or_none()
 
-    if not platform_app:
-        platform_app = App(
-            app_code="platform",
+    if not nexuskit_app:
+        nexuskit_app = App(
+            app_code="nexuskit",
             app_name="NexusKit 核心管理平台",
             app_secret=uuid.uuid4().hex,
         )
-        db.add(platform_app)
+        db.add(nexuskit_app)
         await db.flush()
-        logger.info("  + 应用 'platform' 已创建")
+        logger.info("  + 应用 'nexuskit' 已创建")
         created = True
 
     # 2. Initialize department
@@ -60,12 +60,12 @@ async def _seed_permissions(db: AsyncSession) -> bool:
     sys_mng = result.scalar_one_or_none()
 
     if not sys_mng:
-        sys_mng = Permission(app_code="platform", code="sys:mng", name="系统管理", type="M", icon="setting", sort=100)
+        sys_mng = Permission(app_code="nexuskit", code="sys:mng", name="系统管理", type="M", icon="setting", sort=100)
         db.add(sys_mng)
         await db.flush()
 
         user_mng = Permission(
-            app_code="platform",
+            app_code="nexuskit",
             parent_id=sys_mng.id,
             code="sys:user:view",
             name="用户管理",
@@ -79,7 +79,7 @@ async def _seed_permissions(db: AsyncSession) -> bool:
         await db.flush()
 
         user_add = Permission(
-            app_code="platform", parent_id=user_mng.id, code="sys:user:add", name="新增用户", type="F", sort=1
+            app_code="nexuskit", parent_id=user_mng.id, code="sys:user:add", name="新增用户", type="F", sort=1
         )
         db.add(user_add)
         logger.info("  + 权限树: 系统管理 -> 用户管理 -> 新增用户")
@@ -90,7 +90,7 @@ async def _seed_permissions(db: AsyncSession) -> bool:
     admin_role = result.scalar_one_or_none()
 
     if not admin_role:
-        admin_role = Role(app_code="platform", role_name="超级管理员", role_code="super_admin")
+        admin_role = Role(app_code="nexuskit", role_name="超级管理员", role_code="super_admin")
         all_perms = (await db.execute(select(Permission))).scalars().all()
         admin_role.permissions = list(all_perms)
         db.add(admin_role)

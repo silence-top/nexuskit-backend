@@ -24,6 +24,24 @@ role_permissions = Table(
 
 
 # ---------------------------------------------------------------------------
+# App 管理模式枚举（展示管理后台哪些面板，不限制接口调用）
+# ---------------------------------------------------------------------------
+
+class AppPermMode:
+    """应用权限管理模式。
+
+    不限制子系统能调哪些接口，仅决定：
+      1. 管理后台显示哪些管理面板
+      2. bootstrap 接口的查询范围优化
+
+    FULL      - 平台管理：角色 + 菜单节点 + 角色-菜单绑定
+    ROLE_ONLY - 平台仅管角色分配，无菜单管理面板
+    """
+    FULL      = "full"       # 管理：角色 + 菜单
+    ROLE_ONLY = "role_only"  # 管理：仅角色
+
+
+# ---------------------------------------------------------------------------
 # App — subsystem registration
 # ---------------------------------------------------------------------------
 
@@ -33,9 +51,17 @@ class App(Base):
     app_code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False, comment="app key")
     app_name: Mapped[str] = mapped_column(String(64), nullable=False)
     app_secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    perm_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=AppPermMode.FULL,
+        server_default=AppPermMode.FULL,
+        comment="权限模式: full=完整RBAC | role_only=仅角色 | passthru=SSO直通"
+    )
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="系统描述")
 
     def __repr__(self):
-        return f"<App(code={self.app_code}, name={self.app_name})>"
+        return f"<App(code={self.app_code}, name={self.app_name}, mode={self.perm_mode})>"
 
 
 # ---------------------------------------------------------------------------

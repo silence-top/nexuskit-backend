@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.auth.schemas import RoleBrief
 from domains.identity.exceptions import MenuHasChildrenError, MenuNotFoundError
-from domains.identity.models import Permission, Role, role_permissions, user_roles
+from domains.identity.models import App, AppPermMode, Permission, Role, role_permissions, user_roles
 from domains.identity.repository import PermissionRepository
 from domains.identity.schemas import MenuCreate, MenuUpdate
 
@@ -19,6 +19,13 @@ class IdentityService:
         self._perm_repo = PermissionRepository(db)
 
     # --- Cross-domain: provide roles for Auth domain ---
+
+    async def get_app(self, app_code: str) -> App | None:
+        """Get App entity by app_code."""
+        result = await self.db.execute(
+            select(App).where(App.app_code == app_code)
+        )
+        return result.scalar_one_or_none()
 
     async def get_user_roles_for_app(self, user_id: int, app_code: str) -> list[RoleBrief]:
         """Return roles for a user filtered by app_code. Called by AuthService."""
@@ -34,10 +41,55 @@ class IdentityService:
             for r in roles
         ]
 
-    # --- User identity meta ---
+    # ── 阶梯 A：纯角色编码列表（最轻量级）──────────────────────────
 
-    async def get_user_identity_meta(self, user_id: int, app_code: str) -> dict[str, Any]:
-        """Core method: fetch menu tree + global button permission codes in one pass."""
+    async def get_user_role_codes(self, user_id: int, app_code: str) -> list[str]:
+        """阿梯 A：返回用户在指定 App 下的角色编码列表。
+
+        适用：简单 H5、轻量看板、仅需山粒度角色分流的系统。
+        交付：["admin", "store_manager"]
+        """
+        roles = await self.get_user_roles_for_app(user_id, app_code)
+        return [r.role_code for r in roles]
+
+    # ── 阶梯 B：扁平化按钮/接口权限标识（中量级）─────────────────
+
+    async def get_user_permission_codes(self, user_id: int, app_code: str) -> list[str]:
+        """阶梯 B：返回用户在指定 App 下的按钮/接口级权限标识列表。
+
+        适用：页面菜单写死但有按鈕控权需求、后端接口需要精确拦截的系统。
+        交付：["sys:user:export", "sys:order:refund"]
+        业务规则：仅返回 type="F"（按鈕/功能）类型的权限编码。
+        """
+        stmt = (
+            select(Permission.code)
+            .distinct()
+            .join(role_permissions, Permission.id == role_permissions.c.permission_id)
+            .join(Role, Role.id == role_permissions.c.role_id)
+            .join(user_roles, Role.id == user_roles.c.role_id)
+            .where(
+                and_(
+                    user_roles.c.user_id == user_id,
+                    Permission.app_code == app_code,
+                    Permission.type == "F",  # 仅限按鈕/接口级权限
+                    Permission.is_active.is_(True),
+                    Permission.code.is_not(None),
+                )
+            )
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    # ── 阶梯 C：完备动态路由菜单树（重量级）───────────────────
+
+    async def get_user_menu_tree(self, user_id: int, app_code: str) -> dict[str, Any]:
+        """阶梯 C：返回用户在指定 App 下的完备动态路由菜单树。
+
+        适用：需要动态渲染左侧菜单的完整后台系统（如 Pure Admin）。
+        交付：
+          menu_tree   - 嵌套 JSON 菜单树（M=目录, C=菜单, L=外链）
+          permissions - 按钮级权限编码列表（F=按鈕）
+        """
         stmt = (
             select(Permission)
             .distinct()
@@ -45,44 +97,65 @@ class IdentityService:
             .join(Role, Role.id == role_permissions.c.role_id)
             .join(user_roles, Role.id == user_roles.c.role_id)
             .where(
-                and_(user_roles.c.user_id == user_id, Permission.app_code == app_code, Permission.is_active.is_(True))
+                and_(
+                    user_roles.c.user_id == user_id,
+                    Permission.app_code == app_code,
+                    Permission.is_active.is_(True),
+                )
             )
             .order_by(Permission.sort.asc())
         )
-
         result = await self.db.execute(stmt)
         all_perms = result.scalars().all()
 
-        menu_dict = {}
-        permissions_codes = []
+        menu_dict: dict[int, dict] = {}
+        perm_codes: list[str] = []
 
         for p in all_perms:
-            if p.code:
-                permissions_codes.append(p.code)
-            if p.type in ["M", "C"]:
+            if p.type == "F":
+                # 按鈕/接口权限 → 加入权限编码列表
+                if p.code:
+                    perm_codes.append(p.code)
+            elif p.type in ("M", "C", "L"):
+                # 目录/菜单/外链 → 加入菜单树
                 menu_dict[p.id] = {
                     "id": p.id,
                     "parent_id": p.parent_id,
                     "name": p.name,
                     "path": p.path,
                     "component": p.component,
-                    "meta": {"title": p.name, "icon": p.icon, "order": p.sort, "type": p.type, "keepAlive": True},
+                    "is_ext": p.is_ext,
+                    "ext_url": p.ext_url,
+                    "meta": {
+                        "title": p.name,
+                        "icon": p.icon,
+                        "order": p.sort,
+                        "type": p.type,
+                        "keepAlive": True,
+                    },
                     "children": [],
                 }
 
-        menu_tree = []
+        # 组装嵌套树
+        roots: list[dict] = []
         for p in all_perms:
-            if p.id in menu_dict:
-                node = menu_dict[p.id]
-                if p.parent_id and p.parent_id in menu_dict:
-                    menu_dict[p.parent_id]["children"].append(node)
-                else:
-                    menu_tree.append(node)
+            if p.id not in menu_dict:
+                continue
+            node = menu_dict[p.id]
+            if p.parent_id and p.parent_id in menu_dict:
+                menu_dict[p.parent_id]["children"].append(node)
+            else:
+                roots.append(node)
 
-        return {
-            "menu_tree": menu_tree,
-            "permissions": list(set(permissions_codes)),
-        }
+        return {"menu_tree": roots, "buttons": list(set(perm_codes))}
+
+    # ── 上层聊天模式：自动根据 App 的 perm_mode 分发到对应阶梯────────
+
+    async def get_user_identity_meta(self, user_id: int, app_code: str) -> dict[str, Any]:
+        """[已废弃] 便利方法，router 层已直接调用具体阶梯方法，此方法保留仅供内部测试用。"""
+        roles = await self.get_user_role_codes(user_id, app_code)
+        tree = await self.get_user_menu_tree(user_id, app_code)
+        return {"roles": roles, **tree}
 
     async def cache_user_permissions(self, user_id: int) -> list[str]:
         """Sync permissions to Redis for gateway fast auth."""
@@ -179,6 +252,10 @@ class IdentityService:
     # --- Menu CRUD ---
 
     async def create_menu(self, data: MenuCreate) -> None:
+        # 防循环引用校验
+        dummy_id = -1  # 新建时还没有 id，用 -1 占位不会与任何已有 id 冲突
+        if not await self.validate_menu_relation(dummy_id, data.parent_id):
+            raise MenuNotFoundError("父菜单不存在")
         perm = await self._perm_repo.create(data.model_dump())
         await self.db.commit()
         await self.clear_app_cache_for_users(perm.app_code)
@@ -187,6 +264,10 @@ class IdentityService:
         menu = await self._perm_repo.get_by_id(menu_id)
         if not menu:
             raise MenuNotFoundError("菜单不存在")
+        # 防循环引用校验
+        new_parent = data.parent_id if data.parent_id is not None else menu.parent_id
+        if not await self.validate_menu_relation(menu_id, new_parent):
+            raise MenuNotFoundError("父菜单不存在或形成循环引用")
         app_code = menu.app_code
         await self._perm_repo.update(menu_id, data.model_dump(exclude_unset=True))
         await self.db.commit()
