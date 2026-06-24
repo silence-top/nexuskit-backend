@@ -2,6 +2,7 @@ require('dotenv').config();
 const fastify = require('fastify')({ logger: true });
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // --- 基础配置 ---
 const PORT = parseInt(process.env.PORT || '8000', 10);
@@ -15,16 +16,85 @@ const REDIS_URL = process.env.REDIS_URL;
  */
 const BizCode = {
     // 2xx 成功
-    SUCCESS:          20000,
-    // 401 认证失败
-    UNAUTHORIZED:     40100,
-    TOKEN_EXPIRED:    40101,
-    TOKEN_INVALID:    40102,
-    TOKEN_REVOKED:    40103,
-    // 403 权限不足
-    SESSION_EXPIRED:  40303,
-    // 500 服务器错误
-    INTERNAL_ERROR:   50000,
+    SUCCESS:               20000,
+    CREATED:               20100,
+
+    // 400 请求参数错误
+    BAD_REQUEST:           40000,
+    PARAM_MISSING:         40001,
+    PARAM_INVALID:         40002,
+    PARAM_TOO_LONG:        40003,
+    IMPORT_ERROR:          40004,
+
+    // 401 认证失败（需重新登录）
+    UNAUTHORIZED:          40100,
+    TOKEN_EXPIRED:         40101,
+    TOKEN_INVALID:         40102,
+    TOKEN_REVOKED:         40103,
+    TOKEN_VERSION:         40104,
+    TOKEN_MISSING:         40105,
+    TOKEN_MISUSE:          40106,
+    USER_NOT_FOUND:        40107,
+    INVALID_CREDS:         40108,
+    SIGN_INVALID:          40109,
+    MFA_REQUIRED:          40110,
+    MFA_INVALID:           40111,
+
+    // 403 权限不足（已认证但无权操作）
+    FORBIDDEN:             40300,
+    APP_FORBIDDEN:         40301,  // 无该系统访问权限（多系统隔离）
+    USER_BANNED:           40302,
+    SESSION_EXPIRED:       40303,
+    DATA_SCOPE:            40304,
+    ACCOUNT_LOCKED:        40305,
+    ACCOUNT_EXPIRED:       40306,
+
+    // 404 资源不存在
+    NOT_FOUND:             40400,
+
+    // 405 方法不允许
+    METHOD_NOT_ALLOWED:    40500,
+
+    // 409 资源冲突
+    CONFLICT:              40900,
+    USER_EXISTS:           40901,
+    ROLE_EXISTS:           40902,
+    DEPT_EXISTS:           40903,
+    MENU_EXISTS:           40904,
+
+    // 410 资源已删除
+    GONE:                  41000,
+
+    // 413 请求体/文件过大
+    PAYLOAD_TOO_LARGE:     41300,
+    FILE_TOO_LARGE:        41301,
+
+    // 415 媒体类型不支持
+    UNSUPPORTED_MEDIA_TYPE: 41500,
+
+    // 422 参数校验失败
+    UNPROCESSABLE:         42200,
+    BUSI_STATUS:           42201,
+    RELATION_EXISTS:       42202,
+
+    // 429 限流
+    TOO_MANY:              42900,
+    REFRESH_CONFLICT:      42901,
+    LOGIN_TOO_MANY:        42902,
+
+    // 500 服务器内部错误
+    INTERNAL_ERROR:        50000,
+    DB_ERROR:              50001,
+    CACHE_ERROR:           50002,
+    IO_ERROR:              50003,
+
+    // 501 功能未实现
+    NOT_IMPLEMENTED:       50100,
+
+    // 502/503/504 网关类
+    BAD_GATEWAY:           50200,
+    UNAVAILABLE:           50300,
+    GATEWAY_TIMEOUT:       50400,
 };
 
 /**
@@ -171,6 +241,17 @@ fastify.addHook('onSend', async (request, reply, payload) => {
 });
 
 /**
+ * 生成网关 → 后端的内部信任令牌（HMAC-SHA256）
+ * 格式：{timestamp}.{hmac}   timestamp = Unix 秒
+ * 后端验证：签名匹配 + 时间戳在 ±30s 窗口内（防重放）
+ */
+function buildGatewayToken() {
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const sig = crypto.createHmac('sha256', INTERNAL_SECRET).update(ts).digest('hex');
+    return `${ts}.${sig}`;
+}
+
+/**
  * 4. 构建代理的请求头重写逻辑
  */
 function buildProxyHeaders(request, headers) {
@@ -178,9 +259,9 @@ function buildProxyHeaders(request, headers) {
         ...headers,
         'X-NexusKit-Trace-Id': request.traceId,
         'X-App-Code': request.appCode,
+        'X-Gateway-Token': buildGatewayToken(),  // 每次请求动态签名，防重放
     };
     if (request.user) {
-        newHeaders['X-Internal-Secret'] = INTERNAL_SECRET;
         newHeaders['X-User-Id'] = request.user.sub.toString();
         if (request.user.ver !== undefined) {
             newHeaders['X-User-Version'] = request.user.ver.toString();

@@ -9,6 +9,7 @@ from common.exceptions.base import DomainError
 from core.lifespan import lifespan
 from domains.auth.router import router as auth_router
 from domains.identity.router import router as identity_router
+from middleware.gateway_trust import GatewayTrustMiddleware
 from middleware.trace import TraceMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -16,7 +17,10 @@ logger = logging.getLogger("nexuskit")
 
 app = FastAPI(title="NexusKit Auth Service", lifespan=lifespan)
 
-# Middleware: Trace ID injection
+# Middleware 执行顺序：注册顺序与请求顺序相反——后注册的先执行
+# 1. GatewayTrust （最外层，最先拦截非网关请求）
+app.add_middleware(GatewayTrustMiddleware)
+# 2. Trace ID 注入
 app.add_middleware(TraceMiddleware)
 
 # SDK exception handlers (422 / 500 fallback)
