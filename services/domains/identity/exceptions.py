@@ -3,6 +3,8 @@ from nexuskit_sdk.codes import BizCode
 from common.exceptions.base import DomainError
 
 
+# ── Menu ────────────────────────────────────────────
+
 class MenuDomainError(DomainError):
     status_code = 400
     biz_code = BizCode.BAD_REQUEST
@@ -15,5 +17,69 @@ class MenuNotFoundError(MenuDomainError):
 
 class MenuHasChildrenError(MenuDomainError):
     """Cannot delete menu that still has children — relation constraint."""
+    status_code = 400
+    biz_code = BizCode.RELATION_EXISTS
+
+
+# ── App ────────────────────────────────────────────
+
+class AppDomainError(DomainError):
+    status_code = 400
+    biz_code = BizCode.BAD_REQUEST
+
+
+class AppNotFoundError(AppDomainError):
+    status_code = 404
+    biz_code = BizCode.NOT_FOUND
+
+
+class AppAlreadyExistsError(AppDomainError):
+    status_code = 409
+    biz_code = BizCode.CONFLICT
+
+
+class AppAccessForbiddenError(AppDomainError):
+    """User has no active access grant to this app."""
+    status_code = 403
+    biz_code = BizCode.APP_FORBIDDEN
+
+
+# ── Role ───────────────────────────────────────────
+
+class RoleDomainError(DomainError):
+    status_code = 400
+    biz_code = BizCode.BAD_REQUEST
+
+
+class RoleNotFoundError(RoleDomainError):
+    status_code = 404
+    biz_code = BizCode.NOT_FOUND
+
+
+class RoleAlreadyExistsError(RoleDomainError):
+    status_code = 409
+    biz_code = BizCode.ROLE_EXISTS
+
+
+class RoleHasUsersError(RoleDomainError):
+    """Cannot delete role that still has users assigned."""
+    status_code = 400
+    biz_code = BizCode.RELATION_EXISTS
+
+
+# ── Department ──────────────────────────────────────────
+
+class DeptDomainError(DomainError):
+    status_code = 400
+    biz_code = BizCode.BAD_REQUEST
+
+
+class DeptNotFoundError(DeptDomainError):
+    status_code = 404
+    biz_code = BizCode.NOT_FOUND
+
+
+class DeptHasChildrenError(DeptDomainError):
+    """Cannot delete department that still has sub-departments."""
     status_code = 400
     biz_code = BizCode.RELATION_EXISTS

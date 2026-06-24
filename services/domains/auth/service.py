@@ -15,9 +15,10 @@ from domains.auth.exceptions import (
     TokenRefreshConflictError,
     TokenRevokedError,
     UserAlreadyExistsError,
+    UserNotFoundError,
 )
 from domains.auth.repository import UserRepository
-from domains.auth.schemas import LoginResponse, TokenPair, UserCreate, UserLogin, UserRead
+from domains.auth.schemas import LoginResponse, PasswordChange, TokenPair, UserCreate, UserLogin, UserRead
 from domains.identity.service import IdentityService
 
 
@@ -27,12 +28,12 @@ class AuthService:
         self.redis = redis
         self.identity_service = identity_service
 
-    # --- Registration ---
+    # --- 修改密码（本人） ---
 
     async def register(self, user_in: UserCreate) -> UserRead:
         """Guard -> create -> commit -> return schema (ORM never leaves this method)."""
         if await self.repo.get_by_email(user_in.email):
-            raise UserAlreadyExistsError("邮箱已存在")
+            raise UserAlreadyExistsError("邮笱已存在")
         user = await self.repo.create(
             username=user_in.username,
             email=user_in.email,
@@ -42,6 +43,25 @@ class AuthService:
         await self.repo.session.refresh(user)
         return UserRead.model_validate(user)
 
+    # --- 修改密码（本人） ---
+
+    async def change_password(self, user_id: int, data: PasswordChange) -> None:
+        user = await self.repo.get_by_id(user_id)
+        if not user:
+            raise UserNotFoundError("用户不存在")
+        if not verify_password(data.old_password, user.hashed_password):
+            raise InvalidCredentialsError("旧密码错误")
+        await self.repo.update(user, hashed_password=get_password_hash(data.new_password), version=user.version + 1)
+        await self.repo.session.commit()
+        # 密码变更后强制重新登录
+        await revoke_all_user_tokens(user_id, self.redis)
+    
+    # --- 强制下线（本人/公共） ---
+
+    async def force_logout(self, user_id: int) -> None:
+        """Revoke all sessions for a user."""
+        await revoke_all_user_tokens(user_id, self.redis)
+
     # --- Login ---
 
     async def login(self, user_in: UserLogin, app_code: str) -> LoginResponse:
@@ -50,8 +70,8 @@ class AuthService:
         if not user or not verify_password(user_in.password, user.hashed_password):
             raise InvalidCredentialsError("账号或密码错误")
 
-        # Cross-domain call: get roles from IdentityService
-        await self.identity_service.get_user_roles_for_app(user.id, app_code)
+        # Cross-domain call: check app access before issuing token
+        await self.identity_service.check_user_app_access(user.id, app_code)
 
         # Invalidate all existing sessions before issuing new token pair
         await self._revoke_all_sessions(user.id)

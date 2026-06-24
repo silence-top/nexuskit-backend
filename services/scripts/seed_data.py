@@ -56,11 +56,11 @@ async def _seed_permissions(db: AsyncSession) -> bool:
         created = True
 
     # 3. Initialize permission tree
-    result = await db.execute(select(Permission).where(Permission.code == "sys:mng"))
+    result = await db.execute(select(Permission).where(Permission.code == "sys:system:manage"))
     sys_mng = result.scalar_one_or_none()
 
     if not sys_mng:
-        sys_mng = Permission(app_code="nexuskit", code="sys:mng", name="系统管理", type="M", icon="setting", sort=100)
+        sys_mng = Permission(app_code="nexuskit", code="sys:system:manage", name="系统管理", type="M", icon="setting", sort=100)
         db.add(sys_mng)
         await db.flush()
 

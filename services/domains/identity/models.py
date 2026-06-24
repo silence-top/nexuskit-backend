@@ -1,5 +1,7 @@
 # domains/identity/models.py — Identity domain entities (Role, Permission, Department, App, association tables)
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Table, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from common.base import Base
@@ -40,6 +42,40 @@ class AppPermMode:
     FULL      = "full"       # 管理：角色 + 菜单
     ROLE_ONLY = "role_only"  # 管理：仅角色
 
+
+# ---------------------------------------------------------------------------
+# UserApp — user ↔ app access binding (强校验：显式授权才可访问)
+# ---------------------------------------------------------------------------
+
+class UserApp(Base):
+    __tablename__ = "auth_user_apps"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="user id",
+    )
+    app_code: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("auth_apps.app_code", ondelete="CASCADE"),
+        primary_key=True,
+        comment="app code",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", comment="是否启用"
+    )
+    expired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="过期时间，NULL=永久"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default="now()",
+        comment="授权时间",
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserApp(user={self.user_id}, app={self.app_code}, active={self.is_active})>"
 
 # ---------------------------------------------------------------------------
 # App — subsystem registration
