@@ -28,9 +28,9 @@ services:
   api:
     build:
       context: .                # ← 必须改成根目录
-      dockerfile: services/Dockerfile
+      dockerfile: core-service/Dockerfile
     volumes:
-      - ./services:/app         # ← 热更新
+      - ./core-service:/app         # ← 热更新
       - ./sdk:/sdk              # ← SDK 热更新（可选）
     ports:
       - "5000:5000"

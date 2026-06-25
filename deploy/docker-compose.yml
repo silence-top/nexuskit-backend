@@ -11,8 +11,9 @@ services:
       - "5432:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro          # 01-create-databases.sql + 02-seed-nexuskit.sql
     healthcheck: # 确保数据库完全启动后，再启动 API 服务
-      test: ["CMD-SHELL", "pg_isready -U nexus_admin -d nexuskit_auth"]
+      test: ["CMD-SHELL", "pg_isready -U nexus_admin -d nexuskit_auth && pg_isready -U nexus_admin -d nexuskit_datahub"]
       interval: 5s
       timeout: 5s
       retries: 5

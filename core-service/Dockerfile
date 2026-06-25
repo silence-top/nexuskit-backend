@@ -13,15 +13,15 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --upgrade pip setuptools wheel build
 
 COPY sdk /sdk
-COPY services/pyproject.toml .
+COPY core-service/pyproject.toml .
 
 RUN pip install --no-cache-dir .
 
 # 复制服务代码
-COPY services /app
+COPY core-service /app
 
 # 复制 Docker 环境变量文件（关键）
-COPY services/.env.docker /app/.env
+COPY core-service/.env.docker /app/.env
 
 EXPOSE 5000
 

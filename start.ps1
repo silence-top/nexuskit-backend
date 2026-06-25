@@ -22,7 +22,12 @@ Write-Host "📦 启动微服务全家桶..." -ForegroundColor Green
 # Backend
 Start-Process cmd.exe `
     -ArgumentList '/k title Backend-Service && .venv\Scripts\uvicorn.exe main:app --reload --port 5000' `
-    -WorkingDirectory 'services'
+    -WorkingDirectory 'core-service'
+
+# Datahub Service
+Start-Process cmd.exe `
+    -ArgumentList '/k title Datahub-Service && .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000' `
+    -WorkingDirectory 'datahub-service'
 
 # Gateway
 Start-Process cmd.exe `

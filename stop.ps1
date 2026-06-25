@@ -4,7 +4,7 @@
 Write-Host "🛑 正在停止 NexusKit 服务..." -ForegroundColor Yellow
 
 # 根据窗口标题查找并关闭（与 start.ps1 中 -Title 对应）
-$titles = @("Backend-Service", "Gateway-Service", "Admin-Service")
+$titles = @("Backend-Service", "Datahub-Service", "Gateway-Service", "Admin-Service")
 foreach ($title in $titles) {
     $proc = Get-Process | Where-Object { $_.MainWindowTitle -like "*$title*" }
     if ($proc) {
