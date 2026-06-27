@@ -133,6 +133,21 @@ const UPSTREAM_SERVICES = [
         appCode: 'nexuskit',
         publicPaths: [],
     },
+    // ── datahub-service（数据中心：设备管理 + 切片上传）──────────────────
+    {
+        prefix: '/api/datahub/auth',
+        upstream: process.env.UPSTREAM_URL || 'http://127.0.0.1:5000',
+        rewrite: '/api/v1/auth',
+        appCode: 'datahub',
+        publicPaths: ['/login', '/register', '/refresh'],
+    },
+    {
+        prefix: '/api/datahub',
+        upstream: process.env.DATAHUB_URL || 'http://127.0.0.1:6000',
+        rewrite: '/api/v1',
+        appCode: 'datahub',
+        publicPaths: ['/devices/scanner/device'],  // 扫描仪查询设备信息，免 JWT
+    },
     // ── 示例：接入 ERP 系统（独立登录入口，复用同一套后端认证服务）────────
     // {
     //     prefix: '/api/erp/auth',
@@ -158,7 +173,9 @@ function isPublicPath(url) {
     return UPSTREAM_SERVICES.some(svc =>
         (svc.publicPaths || []).some(p => {
             const full = svc.prefix + p;
-            return url === full || url.startsWith(full + '?');
+            return url === full
+                || url.startsWith(full + '?')
+                || url.startsWith(full + '/');  // 支持路径参数前缀匹配
         })
     );
 }

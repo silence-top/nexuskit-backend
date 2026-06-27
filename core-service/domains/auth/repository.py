@@ -49,12 +49,12 @@ class UserRepository:
         return list(result.scalars().all()), total
 
     async def create(self, username: str, email: str, hashed_password: str, **kwargs) -> User:
+        kwargs.setdefault("is_active", True)
         user = User(
             username=username,
             email=email,
             hashed_password=hashed_password,
             version=1,
-            is_active=True,
             **kwargs,
         )
         self.session.add(user)

@@ -67,6 +67,26 @@ class RoleHasUsersError(RoleDomainError):
     biz_code = BizCode.RELATION_EXISTS
 
 
+# ── Sync ──────────────────────────────────────────
+
+class PermissionSyncError(DomainError):
+    """权限同步失败。"""
+    status_code = 422
+    biz_code = BizCode.UNPROCESSABLE
+
+
+class RoleSyncError(DomainError):
+    """角色同步失败。"""
+    status_code = 422
+    biz_code = BizCode.UNPROCESSABLE
+
+
+class RoleBindingForbiddenError(DomainError):
+    """不允许手动绑定子系统上报角色的权限。"""
+    status_code = 403
+    biz_code = BizCode.FORBIDDEN
+
+
 # ── Department ──────────────────────────────────────────
 
 class DeptDomainError(DomainError):

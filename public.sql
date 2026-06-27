@@ -155,6 +155,7 @@ CREATE TABLE "public"."auth_permissions" (
   "is_visible" bool NOT NULL DEFAULT true,
   "is_active" bool NOT NULL DEFAULT true,
   "props" text COLLATE "pg_catalog"."default",
+  "synced_at" timestamptz(6),
   "id" int4 NOT NULL DEFAULT nextval('auth_permissions_id_seq'::regclass),
   "created_at" timestamptz(6) NOT NULL DEFAULT now(),
   "updated_at" timestamptz(6) NOT NULL DEFAULT now(),
@@ -176,6 +177,7 @@ COMMENT ON COLUMN "public"."auth_permissions"."sort" IS '排序序号';
 COMMENT ON COLUMN "public"."auth_permissions"."is_visible" IS '菜单是否可见';
 COMMENT ON COLUMN "public"."auth_permissions"."is_active" IS '是否启用状态';
 COMMENT ON COLUMN "public"."auth_permissions"."props" IS '多端适配扩展配置(JSON格式)';
+COMMENT ON COLUMN "public"."auth_permissions"."synced_at" IS '最近一次子系统同步时间戳';
 COMMENT ON COLUMN "public"."auth_permissions"."id" IS '主键ID';
 COMMENT ON COLUMN "public"."auth_permissions"."created_at" IS '创建时间';
 COMMENT ON COLUMN "public"."auth_permissions"."updated_at" IS '最后更新时间';
@@ -185,9 +187,9 @@ COMMENT ON COLUMN "public"."auth_permissions"."is_deleted" IS '是否已删除';
 -- ----------------------------
 -- Records of auth_permissions
 -- ----------------------------
-INSERT INTO "public"."auth_permissions" VALUES ('platform', NULL, 'sys:mng', '系统管理', 'M', NULL, NULL, 'f', NULL, 'setting', 100, 't', 't', NULL, 1, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('platform', 1, 'sys:user:view', '用户管理', 'C', '/system/user', 'system/user/index', 'f', NULL, 'user', 1, 't', 't', NULL, 2, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('platform', 2, 'sys:user:add', '新增用户', 'F', NULL, NULL, 'f', NULL, NULL, 1, 't', 't', NULL, 3, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('platform', NULL, 'sys:mng', '系统管理', 'M', NULL, NULL, 'f', NULL, 'setting', 100, 't', 't', NULL, NULL, 1, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('platform', 1, 'sys:user:view', '用户管理', 'C', '/system/user', 'system/user/index', 'f', NULL, 'user', 1, 't', 't', NULL, NULL, 2, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('platform', 2, 'sys:user:add', '新增用户', 'F', NULL, NULL, 'f', NULL, NULL, 1, 't', 't', NULL, NULL, 3, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
 
 -- ----------------------------
 -- Table structure for auth_role_permissions_link
@@ -214,6 +216,7 @@ CREATE TABLE "public"."auth_roles" (
   "app_code" varchar(32) COLLATE "pg_catalog"."default" NOT NULL,
   "role_name" varchar(64) COLLATE "pg_catalog"."default" NOT NULL,
   "role_code" varchar(64) COLLATE "pg_catalog"."default" NOT NULL,
+  "synced_at" timestamptz(6),
   "id" int4 NOT NULL DEFAULT nextval('auth_roles_id_seq'::regclass),
   "created_at" timestamptz(6) NOT NULL DEFAULT now(),
   "updated_at" timestamptz(6) NOT NULL DEFAULT now(),
@@ -224,6 +227,7 @@ CREATE TABLE "public"."auth_roles" (
 COMMENT ON COLUMN "public"."auth_roles"."app_code" IS '所属应用编码';
 COMMENT ON COLUMN "public"."auth_roles"."role_name" IS '角色名称';
 COMMENT ON COLUMN "public"."auth_roles"."role_code" IS '角色唯一编码';
+COMMENT ON COLUMN "public"."auth_roles"."synced_at" IS '最近一次子系统同步时间戳';
 COMMENT ON COLUMN "public"."auth_roles"."id" IS '主键ID';
 COMMENT ON COLUMN "public"."auth_roles"."created_at" IS '创建时间';
 COMMENT ON COLUMN "public"."auth_roles"."updated_at" IS '最后更新时间';
@@ -233,7 +237,7 @@ COMMENT ON COLUMN "public"."auth_roles"."is_deleted" IS '是否已删除';
 -- ----------------------------
 -- Records of auth_roles
 -- ----------------------------
-INSERT INTO "public"."auth_roles" VALUES ('platform', '超级管理员', 'super_admin', 1, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
+INSERT INTO "public"."auth_roles" VALUES ('platform', '超级管理员', 'super_admin', NULL, 1, '2026-03-03 05:57:02.597511+00', '2026-03-03 05:57:02.597511+00', NULL, 'f');
 
 -- ----------------------------
 -- Table structure for auth_user_roles_link

@@ -62,6 +62,38 @@ class MenuOut(BaseModel):
     is_active: bool
 
 
+# ── Permission Sync（子系统全量上报）──────────────────
+
+class PermissionSyncItem(BaseModel):
+    """子系统上报的单个权限节点。"""
+    code: str                        = Field(..., max_length=100, description="权限标识码，全局唯一")
+    name: str                        = Field(..., max_length=64, description="菜单/按鈕名称")
+    type: str                        = Field(..., max_length=10, description="M=目录 C=菜单 F=按鈕 L=外链")
+    parent_code: str | None          = Field(None, max_length=100, description="父节点 code，None=根节点")
+    path: str | None                 = Field(None, max_length=255, description="前端路由路径")
+    component: str | None            = Field(None, max_length=255, description="前端组件路径")
+    is_ext: bool                     = Field(False, description="是否外链")
+    ext_url: str | None              = Field(None, max_length=512, description="外链地址")
+    icon: str | None                 = Field(None, max_length=100, description="菜单图标")
+    sort: int                        = Field(0, description="排序权重")
+    is_visible: bool                 = Field(True, description="是否在菜单中显示")
+    props: str | None                = Field(None, description="JSON 扩展属性")
+
+
+class PermissionSyncRequest(BaseModel):
+    """子系统权限同步请求体。"""
+    items: list[PermissionSyncItem]  = Field(..., description="全量权限清单")
+
+
+class PermissionSyncResult(BaseModel):
+    """同步结果摘要。"""
+    created: int                     = Field(..., description="新增节点数")
+    updated: int                     = Field(..., description="更新节点数")
+    pruned: int                      = Field(..., description="软下线节点数")
+    unchanged: int                   = Field(..., description="无变更节点数")
+    manifest_hash: str               = Field(..., description="本次 manifest SHA-256")
+
+
 # ── App ────────────────────────────────────────────
 
 class AppCreate(BaseModel):
@@ -95,6 +127,29 @@ class AppSecretOut(BaseModel):
     app_code: str
     app_secret: str
     message: str = "请将密鑰安全保存，不会再次展示"
+
+
+# ── Role Sync（子系统角色上报）──────────────────
+
+class RoleSyncItem(BaseModel):
+    """子系统上报的单个角色及其权限绑定。"""
+    role_code: str                     = Field(..., max_length=64, description="角色唯一编码")
+    role_name: str                     = Field(..., max_length=64, description="角色显示名称")
+    permission_codes: list[str]        = Field(default_factory=list, description="该角色绑定的权限编码列表")
+
+
+class RoleSyncRequest(BaseModel):
+    """子系统角色同步请求体。"""
+    items: list[RoleSyncItem]          = Field(..., description="全量角色清单")
+
+
+class RoleSyncResult(BaseModel):
+    """角色同步结果摘要。"""
+    created: int                       = Field(..., description="新增角色数")
+    updated: int                       = Field(..., description="更新角色数（含绑定变更）")
+    pruned: int                        = Field(..., description="软下线角色数")
+    unchanged: int                     = Field(..., description="无变更角色数")
+    manifest_hash: str                 = Field(..., description="本次 manifest SHA-256")
 
 
 # ── Role ───────────────────────────────────────────

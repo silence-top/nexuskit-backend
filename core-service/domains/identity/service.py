@@ -1,6 +1,9 @@
 # domains/identity/service.py — Identity business logic
-from datetime import datetime
+import hashlib
+import json
 import secrets
+from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Any
 
 from redis.asyncio import Redis
@@ -15,11 +18,18 @@ from domains.identity.exceptions import (
     AppAlreadyExistsError, AppNotFoundError,
     DeptHasChildrenError, DeptNotFoundError,
     MenuHasChildrenError, MenuNotFoundError,
-    RoleAlreadyExistsError, RoleHasUsersError, RoleNotFoundError,
+    PermissionSyncError,
+    RoleAlreadyExistsError, RoleBindingForbiddenError, RoleHasUsersError, RoleNotFoundError,
+    RoleSyncError,
 )
 from domains.identity.models import App, AppPermMode, Department, Permission, Role, UserApp, role_permissions, user_roles
-from domains.identity.repository import PermissionRepository
-from domains.identity.schemas import AppCreate, AppUpdate, DepartmentCreate, DepartmentUpdate, MenuCreate, MenuUpdate, PasswordReset, RoleCreate, RolePermissionsAssign, RoleUpdate, UserAdminCreate, UserAdminUpdate, UserAppGrant, UserAppUpdate
+from domains.identity.repository import PermissionRepository, RoleRepository
+from domains.identity.schemas import (
+    AppCreate, AppUpdate, DepartmentCreate, DepartmentUpdate,
+    MenuCreate, MenuUpdate, PasswordReset, PermissionSyncItem, PermissionSyncResult,
+    RoleCreate, RolePermissionsAssign, RoleSyncItem, RoleSyncResult, RoleUpdate,
+    UserAdminCreate, UserAdminUpdate, UserAppGrant, UserAppUpdate,
+)
 
 
 class IdentityService:
@@ -27,6 +37,7 @@ class IdentityService:
         self.db = db
         self.redis = redis
         self._perm_repo = PermissionRepository(db)
+        self._role_repo = RoleRepository(db)
         self._user_repo = user_repo
 
     # --- Cross-domain: provide roles for Auth domain ---
@@ -263,6 +274,342 @@ class IdentityService:
             keys += [f"menu_tree:{uid}:{app_code}" for uid in user_ids]
             await self.redis.delete(*keys)
 
+    # ─────────────────────────────────────────────────────────
+    # 权限同步：三阶段 Diff 对齐算法
+    # ─────────────────────────────────────────────────────────
+
+    # 用于变更检测的字段集合
+    _SYNC_COMPARE_FIELDS = (
+        "name", "type", "path", "component", "is_ext",
+        "ext_url", "icon", "sort", "is_visible", "props",
+    )
+
+    @staticmethod
+    def _compute_manifest_hash(items: list[PermissionSyncItem]) -> str:
+        """SHA-256 指纹，用于幂等性短路。"""
+        payload = json.dumps(
+            [item.model_dump() for item in sorted(items, key=lambda x: x.code)],
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    @staticmethod
+    def _topo_sort(items: list[PermissionSyncItem]) -> list[list[PermissionSyncItem]]:
+        """按 parent_code 拓扑分层：根节点在第一层，子节点在后续层。
+
+        返回分层列表，每层内的节点可并行插入。
+        """
+        children_map: dict[str | None, list[PermissionSyncItem]] = defaultdict(list)
+        code_set: set[str] = set()
+        for item in items:
+            children_map[item.parent_code].append(item)
+            code_set.add(item.code)
+
+        layers: list[list[PermissionSyncItem]] = []
+        queue: deque[str | None] = deque([None])  # None = 根层
+
+        while queue:
+            layer_size = len(queue)
+            layer: list[PermissionSyncItem] = []
+            for _ in range(layer_size):
+                parent_code = queue.popleft()
+                for child in children_map.get(parent_code, []):
+                    layer.append(child)
+                    queue.append(child.code)
+            if layer:
+                layers.append(layer)
+
+        return layers
+
+    def _has_field_changes(self, existing: Permission, item: PermissionSyncItem) -> bool:
+        """精准比对核心字段，只有实际变更才返回 True。"""
+        for field in self._SYNC_COMPARE_FIELDS:
+            old_val = getattr(existing, field, None)
+            new_val = getattr(item, field, None)
+            if old_val != new_val:
+                return True
+        return False
+
+    async def sync_permissions(
+        self,
+        app_code: str,
+        items: list[PermissionSyncItem],
+    ) -> PermissionSyncResult:
+        """子系统全量权限同步——三阶段影子对齐算法。
+
+        阶段一 (N-M)：批量新增，按拓扑顺序逐层 Insert
+        阶段二 (N∩M)：智能更新，仅字段变更时触发
+        阶段三 (M-N)：优雅裁剪，软下线 + 级联
+
+        全部包裹在显式事务中，任一阶段失败即整体回滚。
+        """
+        # ① 计算 manifest 指纹
+        manifest_hash = self._compute_manifest_hash(items)
+
+        # ② 拉取全量（含已软下线），构建 M 集合
+        existing_all = await self._perm_repo.get_all_by_app(app_code, is_active=None)
+        existing_by_code: dict[str, Permission] = {p.code: p for p in existing_all}
+
+        # ③ 构建 N 集合
+        manifest_by_code: dict[str, PermissionSyncItem] = {item.code: item for item in items}
+        manifest_codes = set(manifest_by_code.keys())
+        existing_codes = set(existing_by_code.keys())
+
+        new_codes = manifest_codes - existing_codes        # N - M
+        common_codes = manifest_codes & existing_codes      # N ∩ M
+        pruned_codes = existing_codes - manifest_codes      # M - N
+
+        # ── 显式事务 ──────────────────────────────────────────
+        now = datetime.now(tz=timezone.utc)
+        created_count = 0
+        updated_count = 0
+        unchanged_count = 0
+
+        # code → id 动态映射（已有 + 新插入的）
+        code_to_id: dict[str, int] = {p.code: p.id for p in existing_all}
+
+        try:
+            # ── 阶段一：新增 (N - M) ──────────────────────────────
+            if new_codes:
+                new_items = [manifest_by_code[c] for c in new_codes]
+                layers = self._topo_sort(new_items)
+
+                for layer in layers:
+                    insert_batch: list[dict] = []
+                    for item in layer:
+                        parent_id = None
+                        if item.parent_code:
+                            parent_id = code_to_id.get(item.parent_code)
+                            if parent_id is None:
+                                raise PermissionSyncError(
+                                    f"新增节点 '{item.code}' 的父节点 '{item.parent_code}' 不存在"
+                                )
+                        insert_batch.append({
+                            "app_code": app_code,
+                            "code": item.code,
+                            "name": item.name,
+                            "type": item.type,
+                            "parent_id": parent_id,
+                            "path": item.path,
+                            "component": item.component,
+                            "is_ext": item.is_ext,
+                            "ext_url": item.ext_url,
+                            "icon": item.icon,
+                            "sort": item.sort,
+                            "is_visible": item.is_visible,
+                            "props": item.props,
+                            "is_active": True,
+                            "synced_at": now,
+                        })
+                    created = await self._perm_repo.batch_create(insert_batch)
+                    for perm in created:
+                        code_to_id[perm.code] = perm.id
+                    created_count += len(created)
+
+            # ── 阶段二：智能更新 (N ∩ M) ──────────────────────
+            for code in common_codes:
+                item = manifest_by_code[code]
+                existing = existing_by_code[code]
+
+                if self._has_field_changes(existing, item):
+                    update_data = {f: getattr(item, f) for f in self._SYNC_COMPARE_FIELDS}
+                    update_data["synced_at"] = now
+                    # 若之前被软下线，重新上报时激活
+                    if not existing.is_active:
+                        update_data["is_active"] = True
+                    for k, v in update_data.items():
+                        setattr(existing, k, v)
+                    updated_count += 1
+                else:
+                    # 字段无变更，但如果是软下线状态也需要重新激活
+                    if not existing.is_active:
+                        existing.is_active = True
+                        existing.synced_at = now
+                        updated_count += 1
+                    else:
+                        # 仅刷新 synced_at 时间戳，不计入 updated
+                        existing.synced_at = now
+                        unchanged_count += 1
+
+            await self.db.flush()
+
+            # ── 阶段三：优雅裁剪 (M - N) ──────────────────────
+            pruned_count = 0
+            if pruned_codes:
+                # 直接差集的节点 ID
+                direct_pruned_ids = [existing_by_code[c].id for c in pruned_codes]
+
+                # 级联：查找被裁剪节点的全部活跃后代
+                all_descendant_ids = await self._perm_repo.get_descendant_ids_batch(direct_pruned_ids)
+                # 排除自身（已在 direct_pruned_ids 中）
+                descendant_only = set(all_descendant_ids) - set(direct_pruned_ids)
+
+                # 合并：直接裁剪 + 级联后代
+                all_to_prune = list(set(direct_pruned_ids) | descendant_only)
+                pruned_count = await self._perm_repo.batch_soft_delete(all_to_prune)
+
+            # ── 提交事务 ──────────────────────────────────────
+            await self.db.commit()
+
+        except Exception:
+            await self.db.rollback()
+            raise
+
+        # ── 缓存驱逐链 ──────────────────────────────────────
+        await self.clear_app_cache_for_users(app_code)
+
+        return PermissionSyncResult(
+            created=created_count,
+            updated=updated_count,
+            pruned=pruned_count,
+            unchanged=unchanged_count,
+            manifest_hash=manifest_hash,
+        )
+
+    # ─────────────────────────────────────────────────────────
+    # 角色同步：三阶段 Diff 对齐算法
+    # ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _compute_role_manifest_hash(items: list[RoleSyncItem]) -> str:
+        """SHA-256 指纹，用于幂等性短路。"""
+        payload = json.dumps(
+            [item.model_dump() for item in sorted(items, key=lambda x: x.role_code)],
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    async def sync_roles(
+        self,
+        app_code: str,
+        items: list[RoleSyncItem],
+    ) -> RoleSyncResult:
+        """子系统全量角色同步——三阶段 Diff 对齐算法。
+
+        阶段一 (N-M)：新增角色 + 权限绑定
+        阶段二 (N∩M)：更新名称 + 权限绑定差异比对
+        阶段三 (M-N)：删除不再上报的角色
+
+        全部包裹在显式事务中，任一阶段失败即整体回滚。
+        """
+        # ① 计算 manifest 指纹
+        manifest_hash = self._compute_role_manifest_hash(items)
+
+        # ② 拉取 M 集合（当前 App 下全部角色）
+        existing_roles = await self._role_repo.get_all_by_app(app_code)
+        existing_by_code: dict[str, Role] = {r.role_code: r for r in existing_roles}
+
+        # ③ 构建 N 集合
+        manifest_by_code: dict[str, RoleSyncItem] = {item.role_code: item for item in items}
+        manifest_codes = set(manifest_by_code.keys())
+        existing_codes = set(existing_by_code.keys())
+
+        new_codes = manifest_codes - existing_codes
+        common_codes = manifest_codes & existing_codes
+        pruned_codes = existing_codes - manifest_codes
+
+        # ⑤ 预加载权限 code → id 映射（本 App 全部活跃权限）
+        all_perms = await self._perm_repo.get_all_by_app(app_code, is_active=True)
+        perm_code_to_id: dict[str, int] = {p.code: p.id for p in all_perms}
+
+        now = datetime.now(tz=timezone.utc)
+        created_count = 0
+        updated_count = 0
+        unchanged_count = 0
+
+        try:
+            # ── 阶段一：新增 (N - M) ──────────────────────
+            if new_codes:
+                insert_batch = []
+                for code in new_codes:
+                    item = manifest_by_code[code]
+                    insert_batch.append({
+                        "app_code": app_code,
+                        "role_code": item.role_code,
+                        "role_name": item.role_name,
+                        "synced_at": now,
+                    })
+                created_roles = await self._role_repo.batch_create(insert_batch)
+                created_count = len(created_roles)
+
+                # 绑定权限
+                for role in created_roles:
+                    item = manifest_by_code[role.role_code]
+                    perm_ids = [
+                        perm_code_to_id[pc] for pc in item.permission_codes
+                        if pc in perm_code_to_id
+                    ]
+                    if perm_ids:
+                        await self._role_repo.replace_role_permissions(role.id, perm_ids)
+
+            # ── 阶段二：智能更新 (N ∩ M) ──────────────────────
+            for code in common_codes:
+                item = manifest_by_code[code]
+                role = existing_by_code[code]
+
+                # 检测名称变更
+                name_changed = role.role_name != item.role_name
+
+                # 检测权限绑定变更
+                current_perm_ids = set(await self._role_repo.get_role_permission_ids(role.id))
+                target_perm_ids = set(
+                    perm_code_to_id[pc] for pc in item.permission_codes
+                    if pc in perm_code_to_id
+                )
+                binding_changed = current_perm_ids != target_perm_ids
+
+                if name_changed or binding_changed:
+                    if name_changed:
+                        role.role_name = item.role_name
+                    role.synced_at = now
+                    if binding_changed:
+                        await self._role_repo.replace_role_permissions(
+                            role.id, list(target_perm_ids)
+                        )
+                    updated_count += 1
+                else:
+                    # 无变更，仅刷新时间戳
+                    role.synced_at = now
+                    unchanged_count += 1
+
+            await self.db.flush()
+
+            # ── 阶段三：裁剪 (M - N) ──────────────────────
+            pruned_count = 0
+            if pruned_codes:
+                pruned_ids = [existing_by_code[c].id for c in pruned_codes]
+                # 检查是否有用户绑定这些角色
+                for pid in pruned_ids:
+                    user_check = await self.db.execute(
+                        select(user_roles.c.user_id).where(user_roles.c.role_id == pid).limit(1)
+                    )
+                    if user_check.scalar_one_or_none() is not None:
+                        raise RoleSyncError(
+                            f"角色 '{existing_by_code[pruned_codes.pop()].role_code}' "
+                            "仍有用户绑定，无法裁剪"
+                        )
+                pruned_count = await self._role_repo.batch_soft_delete(pruned_ids)
+
+            # ── 提交事务 ──────────────────────────────────
+            await self.db.commit()
+
+        except Exception:
+            await self.db.rollback()
+            raise
+
+        # ── 缓存驱逐链 ──────────────────────────────────
+        await self.clear_app_cache_for_users(app_code)
+
+        return RoleSyncResult(
+            created=created_count,
+            updated=updated_count,
+            pruned=pruned_count,
+            unchanged=unchanged_count,
+            manifest_hash=manifest_hash,
+        )
+
     async def get_menu_list_flat(self, app_code: str) -> list[dict[str, Any]]:
         """Flat menu list for admin management UI."""
         permissions = await self._perm_repo.get_all_by_app(app_code)
@@ -454,11 +801,20 @@ class IdentityService:
         return list(result.scalars().all())
     
     async def assign_role_permissions(self, role_id: int, data: RolePermissionsAssign) -> None:
-        """Batch-replace all permissions for a role (full replace)."""
+        """Batch-replace all permissions for a role (full replace).
+
+        守卫：子系统上报的角色（synced_at 非空）禁止中控平台手动绑定。
+        """
         result = await self.db.execute(select(Role).where(Role.id == role_id))
         role = result.scalar_one_or_none()
         if not role:
             raise RoleNotFoundError("角色不存在")
+        # 子系统上报角色不允许中控平台手动绑定
+        if role.synced_at is not None:
+            raise RoleBindingForbiddenError(
+                f"角色 '{role.role_code}' 由子系统上报（synced_at={role.synced_at}），"
+                "禁止中控平台手动绑定权限，请通过子系统 sync 接口管理"
+            )
         # 全量替换：删旧插新
         await self.db.execute(delete(role_permissions).where(role_permissions.c.role_id == role_id))
         if data.permission_ids:

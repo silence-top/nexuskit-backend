@@ -1,5 +1,5 @@
 # domains/identity/router.py — Identity HTTP endpoints
-from fastapi import APIRouter, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from common.responses import success
 from domains.auth.dependencies import CurrentUserDep
@@ -8,8 +8,8 @@ from domains.identity.schemas import (
     AppCreate, AppUpdate, AppSecretOut,
     DepartmentCreate, DepartmentUpdate,
     MenuCreate, MenuUpdate,
-    PasswordReset,
-    RoleCreate, RolePermissionsAssign, RoleUpdate,
+    PasswordReset, PermissionSyncRequest,
+    RoleCreate, RolePermissionsAssign, RoleSyncRequest, RoleUpdate,
     UserAdminCreate, UserAdminUpdate,
     UserAppGrant, UserAppUpdate,
     UserRoleAssign,
@@ -468,3 +468,98 @@ async def internal_get_user_roles(
         {"id": r.id, "app_code": r.app_code, "role_name": r.role_name, "role_code": r.role_code}
         for r in roles
     ])
+
+
+@router.post(
+    "/internal/apps/{app_code}/permissions/sync",
+    summary="[内部] 子系统权限全量同步",
+)
+async def sync_permissions(
+    app: AppSecretDep,
+    service: IdentityServiceDep,
+    data: PermissionSyncRequest,
+    app_code: str = Path(...),
+):
+    """子系统调用：上报全量权限清单，中控平台完成三阶段对齐（新增/更新/软下线）。
+
+    鉴权：AppSecretDep（HMAC-SHA256 签名），不走用户 Token。
+    """
+    # 校验 app_code 与签名中的应用一致
+    if app.app_code != app_code:
+        from domains.identity.exceptions import PermissionSyncError
+        raise PermissionSyncError(f"路径 app_code '{app_code}' 与签名应用 '{app.app_code}' 不一致")
+
+    result = await service.sync_permissions(app_code=app_code, items=data.items)
+    return success(data=result.model_dump(), message="权限同步完成")
+
+
+@router.post(
+    "/internal/apps/{app_code}/roles/sync",
+    summary="[内部] 子系统角色全量同步",
+)
+async def sync_roles(
+    app: AppSecretDep,
+    service: IdentityServiceDep,
+    data: RoleSyncRequest,
+    app_code: str = Path(...),
+):
+    """子系统调用：上报全量角色清单（含权限绑定），中控平台完成三阶段对齐。
+
+    鉴权：AppSecretDep（HMAC-SHA256 签名），不走用户 Token。
+    """
+    if app.app_code != app_code:
+        from domains.identity.exceptions import RoleSyncError
+        raise RoleSyncError(f"路径 app_code '{app_code}' 与签名应用 '{app.app_code}' 不一致")
+
+    result = await service.sync_roles(app_code=app_code, items=data.items)
+    return success(data=result.model_dump(), message="角色同步完成")
+
+
+# ─────────────────────────────────────────────────────────
+# 内部查询接口（供子系统按需获取应用/部门详情）
+# ─────────────────────────────────────────────────────────
+@router.get("/internal/apps/{app_code}", summary="[内部] 查询应用信息")
+async def internal_get_app(
+    app: AppSecretDep,
+    service: IdentityServiceDep,
+    app_code: str = Path(...),
+):
+    """供子系统调用：通过 app_code 查询应用详情。
+
+    鉴权：AppSecretDep（HMAC-SHA256 签名），不走用户 Token。
+    """
+    result = await service.get_app(app_code)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="应用不存在")
+    return success(data={
+        "id": result.id,
+        "app_code": result.app_code,
+        "app_name": result.app_name,
+        "perm_mode": result.perm_mode,
+        "description": result.description,
+    })
+
+
+@router.get("/internal/departments/{dept_id}", summary="[内部] 查询部门信息")
+async def internal_get_department(
+    app: AppSecretDep,
+    service: IdentityServiceDep,
+    dept_id: int = Path(...),
+):
+    """供子系统调用：通过 dept_id 查询部门详情。
+
+    鉴权：AppSecretDep（HMAC-SHA256 签名），不走用户 Token。
+    """
+    dept = await service.get_department(dept_id)
+    if not dept:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="部门不存在")
+    return success(data={
+        "id": dept.id,
+        "dept_name": dept.dept_name,
+        "parent_id": dept.parent_id,
+        "sort": dept.sort,
+        "leader": dept.leader,
+        "phone": dept.phone,
+        "email": dept.email,
+        "is_active": dept.is_active,
+    })

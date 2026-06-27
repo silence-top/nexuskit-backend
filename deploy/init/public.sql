@@ -94,7 +94,7 @@ CREATE TABLE "public"."alembic_version" (
 -- ----------------------------
 -- Records of alembic_version
 -- ----------------------------
-INSERT INTO "public"."alembic_version" VALUES ('0e52f5b7538a');
+INSERT INTO "public"."alembic_version" VALUES ('b4d8f2e91a05');
 
 -- ----------------------------
 -- Table structure for auth_apps
@@ -184,6 +184,7 @@ CREATE TABLE "public"."auth_permissions" (
   "is_visible" bool NOT NULL DEFAULT true,
   "is_active" bool NOT NULL DEFAULT true,
   "props" text COLLATE "pg_catalog"."default",
+  "synced_at" timestamptz(6),
   "id" int4 NOT NULL DEFAULT nextval('auth_permissions_id_seq'::regclass),
   "created_at" timestamptz(6) NOT NULL DEFAULT now(),
   "updated_at" timestamptz(6) NOT NULL DEFAULT now(),
@@ -205,6 +206,7 @@ COMMENT ON COLUMN "public"."auth_permissions"."sort" IS 'sort order';
 COMMENT ON COLUMN "public"."auth_permissions"."is_visible" IS 'visible';
 COMMENT ON COLUMN "public"."auth_permissions"."is_active" IS 'active';
 COMMENT ON COLUMN "public"."auth_permissions"."props" IS 'JSON props';
+COMMENT ON COLUMN "public"."auth_permissions"."synced_at" IS '最近一次子系统同步时间戳';
 COMMENT ON COLUMN "public"."auth_permissions"."id" IS 'PK';
 COMMENT ON COLUMN "public"."auth_permissions"."created_at" IS 'created';
 COMMENT ON COLUMN "public"."auth_permissions"."updated_at" IS 'updated';
@@ -214,14 +216,14 @@ COMMENT ON COLUMN "public"."auth_permissions"."is_deleted" IS 'deleted flag';
 -- ----------------------------
 -- Records of auth_permissions
 -- ----------------------------
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 2, 'sys:user:add', '新增用户', 'F', NULL, NULL, 'f', NULL, NULL, 1, 't', 't', NULL, 3, '2026-06-23 00:52:21.559555+00', '2026-06-23 00:52:21.559555+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', NULL, 'sys:system:manage', '系统管理', 'M', '/system', NULL, 'f', NULL, 'icon-park-outline:setting', 1, 't', 't', NULL, 1, '2026-06-23 00:52:21.559555+00', '2026-06-24 01:06:55.908884+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 1, 'sys:role:manage', '角色管理', 'C', '/system/role', '/setting/roles/index.vue', 'f', NULL, 'carbon:user-role', 1, 't', 't', NULL, 4, '2026-06-23 09:17:53+00', '2026-06-24 01:07:24.081636+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 1, 'sys:user:manage', '用户管理', 'C', '/system/user', '/setting/account/index.vue', 'f', NULL, 'icon-park-outline:every-user', 1, 't', 't', NULL, 2, '2026-06-23 00:52:21.559555+00', '2026-06-24 01:07:44.333004+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 1, 'sys:dept:manage', '部门管理', 'C', '/system/dept', '/setting/dept/index.vue', 'f', NULL, 'carbon:column-dependency', 1, 't', 't', NULL, 5, '2026-06-23 09:29:44+00', '2026-06-24 01:07:58.842863+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', NULL, 'sys:dev:manage', '开发管理', 'M', '/dev', NULL, 'f', NULL, 'carbon:development', 1, 't', 't', NULL, 6, '2026-06-23 09:31:03+00', '2026-06-24 01:08:30.703775+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 6, 'sys:menu:manage', '菜单管理', 'C', '/dev/menu', '/system/menu/index.vue', 'f', NULL, 'icon-park-outline:application-menu', 1, 't', 't', NULL, 7, '2026-06-23 09:32:08+00', '2026-06-24 01:08:46.049337+00', NULL, 'f');
-INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 6, 'sys:app:manage', '应用管理', 'C', '/system/app', '/system/app/index.vue', 'f', NULL, 'icon-park-outline:app-store', 1, 't', 't', NULL, 8, '2026-06-23 09:42:45+00', '2026-06-24 01:09:06.915256+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 2, 'sys:user:add', '新增用户', 'F', NULL, NULL, 'f', NULL, NULL, 1, 't', 't', NULL, NULL, 3, '2026-06-23 00:52:21.559555+00', '2026-06-23 00:52:21.559555+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', NULL, 'sys:system:manage', '系统管理', 'M', '/system', NULL, 'f', NULL, 'icon-park-outline:setting', 1, 't', 't', NULL, NULL, 1, '2026-06-23 00:52:21.559555+00', '2026-06-24 01:06:55.908884+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 1, 'sys:role:manage', '角色管理', 'C', '/system/role', '/setting/roles/index.vue', 'f', NULL, 'carbon:user-role', 1, 't', 't', NULL, NULL, 4, '2026-06-23 09:17:53+00', '2026-06-24 01:07:24.081636+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 1, 'sys:user:manage', '用户管理', 'C', '/system/user', '/setting/account/index.vue', 'f', NULL, 'icon-park-outline:every-user', 1, 't', 't', NULL, NULL, 2, '2026-06-23 00:52:21.559555+00', '2026-06-24 01:07:44.333004+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 1, 'sys:dept:manage', '部门管理', 'C', '/system/dept', '/setting/dept/index.vue', 'f', NULL, 'carbon:column-dependency', 1, 't', 't', NULL, NULL, 5, '2026-06-23 09:29:44+00', '2026-06-24 01:07:58.842863+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', NULL, 'sys:dev:manage', '开发管理', 'M', '/dev', NULL, 'f', NULL, 'carbon:development', 1, 't', 't', NULL, NULL, 6, '2026-06-23 09:31:03+00', '2026-06-24 01:08:30.703775+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 6, 'sys:menu:manage', '菜单管理', 'C', '/dev/menu', '/system/menu/index.vue', 'f', NULL, 'icon-park-outline:application-menu', 1, 't', 't', NULL, NULL, 7, '2026-06-23 09:32:08+00', '2026-06-24 01:08:46.049337+00', NULL, 'f');
+INSERT INTO "public"."auth_permissions" VALUES ('nexuskit', 6, 'sys:app:manage', '应用管理', 'C', '/system/app', '/system/app/index.vue', 'f', NULL, 'icon-park-outline:app-store', 1, 't', 't', NULL, NULL, 8, '2026-06-23 09:42:45+00', '2026-06-24 01:09:06.915256+00', NULL, 'f');
 
 -- ----------------------------
 -- Table structure for auth_role_permissions_link
@@ -253,6 +255,7 @@ CREATE TABLE "public"."auth_roles" (
   "app_code" varchar(32) COLLATE "pg_catalog"."default" NOT NULL,
   "role_name" varchar(64) COLLATE "pg_catalog"."default" NOT NULL,
   "role_code" varchar(64) COLLATE "pg_catalog"."default" NOT NULL,
+  "synced_at" timestamptz(6),
   "id" int4 NOT NULL DEFAULT nextval('auth_roles_id_seq'::regclass),
   "created_at" timestamptz(6) NOT NULL DEFAULT now(),
   "updated_at" timestamptz(6) NOT NULL DEFAULT now(),
@@ -263,6 +266,7 @@ CREATE TABLE "public"."auth_roles" (
 COMMENT ON COLUMN "public"."auth_roles"."app_code" IS 'app code';
 COMMENT ON COLUMN "public"."auth_roles"."role_name" IS 'role name';
 COMMENT ON COLUMN "public"."auth_roles"."role_code" IS 'role code';
+COMMENT ON COLUMN "public"."auth_roles"."synced_at" IS '最近一次子系统同步时间戳';
 COMMENT ON COLUMN "public"."auth_roles"."id" IS 'PK';
 COMMENT ON COLUMN "public"."auth_roles"."created_at" IS 'created';
 COMMENT ON COLUMN "public"."auth_roles"."updated_at" IS 'updated';
@@ -272,7 +276,7 @@ COMMENT ON COLUMN "public"."auth_roles"."is_deleted" IS 'deleted flag';
 -- ----------------------------
 -- Records of auth_roles
 -- ----------------------------
-INSERT INTO "public"."auth_roles" VALUES ('nexuskit', '超级管理员', 'super_admin', 1, '2026-06-23 00:52:21.559555+00', '2026-06-23 00:52:21.559555+00', NULL, 'f');
+INSERT INTO "public"."auth_roles" VALUES ('nexuskit', '超级管理员', 'super_admin', NULL, 1, '2026-06-23 00:52:21.559555+00', '2026-06-23 00:52:21.559555+00', NULL, 'f');
 
 -- ----------------------------
 -- Table structure for auth_user_apps

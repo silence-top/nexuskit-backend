@@ -141,6 +141,11 @@ class Role(Base):
     role_name: Mapped[str] = mapped_column(String(64), nullable=False, comment="role name")
     role_code: Mapped[str] = mapped_column(String(64), unique=True, index=True, comment="role code")
 
+    # Sync audit
+    synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="最近一次子系统同步时间戳"
+    )
+
     permissions: Mapped[list["Permission"]] = relationship(
         "Permission", secondary=role_permissions, back_populates="roles",
     )
@@ -182,13 +187,18 @@ class Permission(Base):
     # 6. Extension
     props: Mapped[str | None] = mapped_column(Text, nullable=True, comment="JSON props")
 
-    # 7. Self-referential hierarchy
+    # 7. Sync audit
+    synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="最近一次子系统同步时间戳"
+    )
+
+    # 8. Self-referential hierarchy
     parent: Mapped["Permission"] = relationship("Permission", remote_side="Permission.id", back_populates="children")
     children: Mapped[list["Permission"]] = relationship(
         "Permission", back_populates="parent", cascade="all, delete-orphan",
     )
 
-    # 8. M2M with Role
+    # 9. M2M with Role
     roles: Mapped[list["Role"]] = relationship("Role", secondary=role_permissions, back_populates="permissions")
 
     def __repr__(self) -> str:

@@ -24,10 +24,10 @@ Start-Process cmd.exe `
     -ArgumentList '/k title Backend-Service && .venv\Scripts\uvicorn.exe main:app --reload --port 5000' `
     -WorkingDirectory 'core-service'
 
-# Datahub Service
+# Datahub Service (独立目录，与 nexuskit-backend 同级)
 Start-Process cmd.exe `
-    -ArgumentList '/k title Datahub-Service && .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000' `
-    -WorkingDirectory 'datahub-service'
+    -ArgumentList '/k title Datahub-Service && .venv\Scripts\uvicorn.exe main:app --reload --port 5001' `
+    -WorkingDirectory '../datahub-service'
 
 # Gateway
 Start-Process cmd.exe `

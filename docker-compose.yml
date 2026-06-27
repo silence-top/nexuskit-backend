@@ -53,6 +53,20 @@ services:
     networks:
       - nexus-net
 
+  datahub:
+    build:
+      context: .
+      dockerfile: datahub-service/Dockerfile
+    volumes:
+      - ./datahub-service:/app
+      - ./sdk:/sdk
+    ports:
+      - "5001:5001"
+    depends_on:
+      - db
+    networks:
+      - nexus-net
+
   admin:
     build:
       context: ./admin
