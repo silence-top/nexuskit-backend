@@ -40,6 +40,20 @@ async def _seed_permissions(db: AsyncSession) -> bool:
         logger.info("  + 应用 'nexuskit' 已创建")
         created = True
 
+    result = await db.execute(select(App).where(App.app_code == "datahub"))
+    datahub_app = result.scalar_one_or_none()
+    if not datahub_app:
+        datahub_app = App(
+            app_code="datahub",
+            app_name="数据中心",
+            app_secret="jKZV6Wnop5GTYo_xn7qsvODwygqnHrkzSSxHv-CssEw",
+        )
+        db.add(datahub_app)
+        await db.flush()
+        logger.info("  + 应用 'datahub' 已创建")
+        created = True
+
+
     # 2. Initialize department
     result = await db.execute(select(Department).where(Department.dept_name == "总公司"))
     root_dept = result.scalar_one_or_none()
